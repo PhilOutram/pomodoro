@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pomodoro</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0e0e0f;
+      --surface: #161618;
+      --border: #2a2a2e;
+      --work-color: #e8553e;
+      --break-color: #4ead8a;
+      --accent: #e8553e;
+      --text: #f0ede8;
+      --muted: #6b6869;
+      --ring-bg: #1e1e20;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Atmospheric grain overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      opacity: 0.4;
+      z-index: 100;
+    }
+
+    /* Subtle radial glow behind timer */
+    body::after {
+      content: '';
+      position: fixed;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(232,85,62,0.06) 0%, transparent 70%);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 0.8s ease;
+    }
+
+    body.break-mode::after {
+      background: radial-gradient(circle, rgba(78,173,138,0.06) 0%, transparent 70%);
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 13px;
+      font-weight: 400;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+      transition: color 0.6s ease;
+      margin-top: 4px;
+    }
+
+    .mode-badge::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* Ring Timer */
+    .ring-wrap {
+      position: relative;
+      width: 280px;
+      height: 280px;
+    }
+
+    .ring-svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .ring-track {
+      fill: none;
+      stroke: var(--ring-bg);
+      stroke-width: 3;
+    }
+
+    .ring-progress {
+      fill: none;
+      stroke: var(--work-color);
+      stroke-width: 3;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear, stroke 0.8s ease;
+    }
+
+    /* Tick marks */
+    .tick-layer {
+      position: absolute;
+      inset: 0;
+    }
+
+    .ring-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .time-display {
+      font-family: 'Playfair Display', serif;
+      font-size: 62px;
+      font-weight: 700;
+      letter-spacing: -2px;
+      line-height: 1;
+      color: var(--text);
+      transition: color 0.6s ease;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .session-count {
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .btn {
+      border: none;
+      cursor: pointer;
+      font-family: 'DM Mono', monospace;
+      transition: all 0.2s ease;
+      outline: none;
+      position: relative;
+    }
+
+    .btn-primary {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--work-color);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.6s ease, transform 0.15s ease, box-shadow 0.2s ease;
+      box-shadow: 0 0 0 0 rgba(232,85,62,0.4);
+    }
+
+    .btn-primary:hover {
+      transform: scale(1.06);
+      box-shadow: 0 0 24px rgba(232,85,62,0.25);
+    }
+
+    .btn-primary:active { transform: scale(0.96); }
+
+    .btn-secondary {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.2s, color 0.2s, transform 0.15s;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--text);
+      color: var(--text);
+      transform: scale(1.05);
+    }
+
+    .btn-secondary:active { transform: scale(0.95); }
+
+    body.break-mode .btn-primary {
+      background: var(--break-color);
+      box-shadow: 0 0 0 0 rgba(78,173,138,0.4);
+    }
+
+    body.break-mode .btn-primary:hover {
+      box-shadow: 0 0 24px rgba(78,173,138,0.25);
+    }
+
+    body.break-mode .ring-progress {
+      stroke: var(--break-color);
+    }
+
+    body.break-mode .mode-badge {
+      color: var(--break-color);
+    }
+
+    /* Session dots */
+    .session-dots {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: transparent;
+      transition: background 0.4s ease, border-color 0.4s ease;
+    }
+
+    .dot.filled {
+      background: var(--work-color);
+      border-color: var(--work-color);
+    }
+
+    /* Keyboard hint */
+    .hint {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-align: center;
+      opacity: 0.6;
+    }
+
+    .kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-size: 9px;
+    }
+
+    /* Flash animation on mode switch */
+    @keyframes modeFlash {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
+    .flash { animation: modeFlash 0.5s ease forwards; }
+
+    /* Completed overlay pulse */
+    @keyframes completePulse {
+      0% { box-shadow: 0 0 0 0 rgba(232,85,62,0.5); }
+      70% { box-shadow: 0 0 0 30px rgba(232,85,62,0); }
+      100% { box-shadow: 0 0 0 0 rgba(232,85,62,0); }
+    }
+
+    .btn-primary.complete-pulse { animation: completePulse 0.7s ease; }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <div class="header">
+      <div class="logo">Pomodoro</div>
+      <div class="mode-badge" id="modeBadge">Focus Session</div>
+    </div>
+
+    <div class="ring-wrap">
+      <!-- Tick marks SVG layer -->
+      <svg class="tick-layer" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg" id="tickSvg"></svg>
+
+      <!-- Progress ring -->
+      <svg class="ring-svg" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+        <circle class="ring-track" cx="140" cy="140" r="126"/>
+        <circle class="ring-progress" id="ringProgress" cx="140" cy="140" r="126"/>
+      </svg>
+
+      <div class="ring-center">
+        <div class="time-display" id="timeDisplay">25:00</div>
+        <div class="session-count" id="sessionLabel">Session 1 of 4</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-secondary" id="resetBtn" title="Reset" aria-label="Reset">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+      </button>
+
+      <button class="btn btn-primary" id="playBtn" aria-label="Start">
+        <svg id="playIcon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        <svg id="pauseIcon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+          <rect x="6" y="4" width="4" height="16" rx="1"/>
+          <rect x="14" y="4" width="4" height="16" rx="1"/>
+        </svg>
+      </button>
+
+      <button class="btn btn-secondary" id="skipBtn" title="Skip" aria-label="Skip to next">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5,4 15,12 5,20"/>
+          <line x1="19" y1="4" x2="19" y2="20"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="session-dots" id="sessionDots"></div>
+
+    <div class="hint">
+      <span class="kbd">Space</span> play/pause &nbsp;&nbsp;
+      <span class="kbd">R</span> reset &nbsp;&nbsp;
+      <span class="kbd">S</span> skip
+    </div>
+
+  </div>
+
+  <script>
+    const WORK_DURATION = 25 * 60;
+    const BREAK_DURATION = 5 * 60;
+    const TOTAL_SESSIONS = 4;
+
+    const radius = 126;
+    const circumference = 2 * Math.PI * radius;
+
+    let mode = 'work';    // 'work' | 'break'
+    let session = 1;
+    let timeLeft = WORK_DURATION;
+    let running = false;
+    let interval = null;
+
+    const ringProgress = document.getElementById('ringProgress');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const sessionLabel = document.getElementById('sessionLabel');
+    const modeBadge = document.getElementById('modeBadge');
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const resetBtn = document.getElementById('resetBtn');
+    const skipBtn = document.getElementById('skipBtn');
+    const sessionDots = document.getElementById('sessionDots');
+
+    // Setup ring
+    ringProgress.style.strokeDasharray = circumference;
+    ringProgress.style.strokeDashoffset = 0;
+
+    // Draw tick marks
+    function drawTicks() {
+      const svg = document.getElementById('tickSvg');
+      const cx = 140, cy = 140, innerR = 118, outerR = 124;
+      const count = 60;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
+        const isMajor = i % 5 === 0;
+        const r1 = isMajor ? outerR - 4 : outerR - 2;
+        const r2 = outerR;
+        const x1 = cx + r1 * Math.cos(angle);
+        const y1 = cy + r1 * Math.sin(angle);
+        const x2 = cx + r2 * Math.cos(angle);
+        const y2 = cy + r2 * Math.sin(angle);
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('stroke', isMajor ? '#2e2e32' : '#232326');
+        line.setAttribute('stroke-width', isMajor ? '1.5' : '1');
+        line.setAttribute('stroke-linecap', 'round');
+        svg.appendChild(line);
+      }
+    }
+    drawTicks();
+
+    // Session dots
+    function renderDots() {
+      sessionDots.innerHTML = '';
+      for (let i = 1; i <= TOTAL_SESSIONS; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot' + (i < session || (i === session && mode === 'break') ? ' filled' : '');
+        sessionDots.appendChild(dot);
+      }
+    }
+    renderDots();
+
+    function formatTime(s) {
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    }
+
+    function updateRing() {
+      const total = mode === 'work' ? WORK_DURATION : BREAK_DURATION;
+      const progress = timeLeft / total;
+      const offset = circumference * (1 - progress);
+      ringProgress.style.strokeDashoffset = offset;
+    }
+
+    function updateUI() {
+      timeDisplay.textContent = formatTime(timeLeft);
+      updateRing();
+      document.title = `${formatTime(timeLeft)} — ${mode === 'work' ? 'Focus' : 'Break'} · Pomodoro`;
+    }
+
+    function setMode(newMode) {
+      mode = newMode;
+      timeLeft = newMode === 'work' ? WORK_DURATION : BREAK_DURATION;
+      const isBreak = newMode === 'break';
+      document.body.classList.toggle('break-mode', isBreak);
+      modeBadge.textContent = isBreak ? 'Short Break' : 'Focus Session';
+      modeBadge.classList.add('flash');
+      setTimeout(() => modeBadge.classList.remove('flash'), 500);
+      timeDisplay.classList.add('flash');
+      setTimeout(() => timeDisplay.classList.remove('flash'), 500);
+      renderDots();
+      updateUI();
+    }
+
+    function onComplete() {
+      running = false;
+      clearInterval(interval);
+      playIcon.style.display = '';
+      pauseIcon.style.display = 'none';
+      playBtn.classList.add('complete-pulse');
+      setTimeout(() => playBtn.classList.remove('complete-pulse'), 700);
+
+      if (mode === 'work') {
+        setMode('break');
+      } else {
+        // Break finished — move to next session
+        if (session < TOTAL_SESSIONS) {
+          session++;
+        } else {
+          session = 1; // All sessions done, restart cycle
+        }
+        setMode('work');
+      }
+    }
+
+    function tick() {
+      if (timeLeft <= 0) {
+        onComplete();
+        return;
+      }
+      timeLeft--;
+      updateUI();
+    }
+
+    function startTimer() {
+      running = true;
+      interval = setInterval(tick, 1000);
+      playIcon.style.display = 'none';
+      pauseIcon.style.display = '';
+    }
+
+    function pauseTimer() {
+      running = false;
+      clearInterval(interval);
+      playIcon.style.display = '';
+      pauseIcon.style.display = 'none';
+    }
+
+    function resetTimer() {
+      pauseTimer();
+      timeLeft = mode === 'work' ? WORK_DURATION : BREAK_DURATION;
+      updateUI();
+    }
+
+    function skipTimer() {
+      pauseTimer();
+      if (mode === 'work') {
+        setMode('break');
+      } else {
+        if (session < TOTAL_SESSIONS) session++;
+        else session = 1;
+        setMode('work');
+      }
+    }
+
+    playBtn.addEventListener('click', () => running ? pauseTimer() : startTimer());
+    resetBtn.addEventListener('click', resetTimer);
+    skipBtn.addEventListener('click', skipTimer);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); running ? pauseTimer() : startTimer(); }
+      if (e.key === 'r' || e.key === 'R') resetTimer();
+      if (e.key === 's' || e.key === 'S') skipTimer();
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>
